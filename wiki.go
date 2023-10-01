@@ -12,6 +12,18 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+type WikiError struct {
+	Err string
+}
+
+const (
+	ExecError string = "Exec did not affect any rows"
+)
+
+func (ee *WikiError) Error() string {
+	return fmt.Sprintf("Wiki Error: %v", ee.Err)
+}
+
 type Database struct {
 	db *sql.DB
 }
@@ -21,27 +33,8 @@ type Page struct {
 	Body  []byte
 }
 
-func (p *Page) new(db *sql.DB) (sql.Result, error) {
-	return db.Exec("INSERT INTO pages (title, content) VALUES ($1, $2)", p.Title, p.Body)
-}
-
-func (p *Page) save(db *sql.DB) (sql.Result, error) {
-	return db.Exec("UPDATE pages SET content = $2 WHERE title = $1", p.Title, p.Body)
-}
-
 func loadPage(db *sql.DB, title string) (*Page, error) {
 	row := db.QueryRow("SELECT title, content FROM pages WHERE title = $1 LIMIT 1", title)
-	return rowToPage(row)
-}
-
-func printSqlResult(res sql.Result) {
-	id, _ := res.LastInsertId()
-	fmt.Printf("id inserted: %v", id)
-	rowsNum, _ := res.RowsAffected()
-	fmt.Printf("Amount of rows affected: %v", rowsNum)
-}
-
-func rowToPage(row *sql.Row) (*Page, error) {
 	p := Page{}
 	if err := row.Scan(&p.Title, &p.Body); err != nil {
 		return nil, err
@@ -49,7 +42,11 @@ func rowToPage(row *sql.Row) (*Page, error) {
 	return &p, nil
 }
 
-func rowsToPages(rows *sql.Rows) (*[]Page, error) {
+func loadPages(db *sql.DB, title string) (*[]Page, error) {
+	rows, err := db.Query("SELECT title, content FROM pages WHERE title = $1", title)
+	if err != nil {
+		return nil, err
+	}
 	pages := []Page{}
 	for rows.Next() {
 		p := Page{}
@@ -59,6 +56,52 @@ func rowsToPages(rows *sql.Rows) (*[]Page, error) {
 		pages = append(pages, p)
 	}
 	return &pages, nil
+}
+
+func findPage(db *sql.DB, title string) bool {
+	row := db.QueryRow("SELECT content FROM pages WHERE title = $1 LIMIT 1", title)
+	var content string
+	if err := row.Scan(&content); err != nil {
+		return false
+	}
+	return true
+}
+
+func (p *Page) new(db *sql.DB) error {
+	res, err := db.Exec("INSERT INTO pages (title, content) VALUES ($1, $2)", p.Title, p.Body)
+	if err != nil {
+		return err
+	}
+	RowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if RowsAffected == 0 {
+		return &WikiError{ExecError}
+	}
+	return nil
+}
+
+func (p *Page) save(db *sql.DB) error {
+	res, err := db.Exec("UPDATE pages SET content = $2 WHERE title = $1", p.Title, p.Body)
+	if err != nil {
+		return err
+	}
+	RowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if RowsAffected == 0 {
+		return &WikiError{ExecError}
+	}
+	return nil
+}
+
+func printSqlResult(res sql.Result) {
+	id, _ := res.LastInsertId()
+	fmt.Printf("id inserted: %v", id)
+	rowsNum, _ := res.RowsAffected()
+	fmt.Printf("Amount of rows affected: %v", rowsNum)
 }
 
 var templates = template.Must(template.ParseFiles("templates/edit.html", "templates/view.html"))
@@ -92,16 +135,14 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string, db *sql.D
 func saveHandler(w http.ResponseWriter, r *http.Request, title string, db *sql.DB) {
 	body := r.FormValue("body")
 	p := &Page{Title: title, Body: []byte(body)}
-	res, err := p.save(db)
+	err := p.save(db)
 	if err != nil {
-		res, err := p.new(db)
+		err := p.new(db)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		printSqlResult(res)
 	}
-	printSqlResult(res)
 	http.Redirect(w, r, "/view/"+title, http.StatusFound)
 }
 
