@@ -42,6 +42,7 @@ func loadPage(db *sql.DB, title string) (*Page, error) {
 	return &p, nil
 }
 
+// not used
 func loadPages(db *sql.DB, title string) (*[]Page, error) {
 	rows, err := db.Query("SELECT title, content FROM pages WHERE title = $1", title)
 	if err != nil {
@@ -58,6 +59,7 @@ func loadPages(db *sql.DB, title string) (*[]Page, error) {
 	return &pages, nil
 }
 
+// not used
 func findPage(db *sql.DB, title string) bool {
 	row := db.QueryRow("SELECT content FROM pages WHERE title = $1 LIMIT 1", title)
 	var content string
@@ -97,6 +99,7 @@ func (p *Page) save(db *sql.DB) error {
 	return nil
 }
 
+// not used
 func printSqlResult(res sql.Result) {
 	id, _ := res.LastInsertId()
 	fmt.Printf("id inserted: %v", id)
@@ -135,8 +138,7 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string, db *sql.D
 func saveHandler(w http.ResponseWriter, r *http.Request, title string, db *sql.DB) {
 	body := r.FormValue("body")
 	p := &Page{Title: title, Body: []byte(body)}
-	err := p.save(db)
-	if err != nil {
+	if p.save(db) != nil {
 		err := p.new(db)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
